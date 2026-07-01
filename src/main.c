@@ -34,11 +34,18 @@ static void on_window_destroy(void) {
   if (mpv)    { mpv_destroy(mpv); mpv = NULL; }
 }
 
+/* ---- per-frame tick callback (synced to display refresh) ---- */
+static gboolean on_tick(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
+  (void)w; (void)clock; (void)d;
+  if (gl_area)
+    gtk_gl_area_queue_render(GTK_GL_AREA(gl_area));
+  return G_SOURCE_CONTINUE;
+}
+
 /* ---- mpv wants a redraw ---- */
 static void gl_update(void *ctx) {
   (void)ctx;
-  if (gl_area)
-    gtk_gl_area_queue_render(GTK_GL_AREA(gl_area));
+  /* Tick callback handles render scheduling now */
 }
 
 /* ---- eglGetProcAddress wrapper ---- */
@@ -73,7 +80,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *ctx, gpointer d) {
     {MPV_RENDER_PARAM_WL_DISPLAY, wl_display},
     {0, NULL}
   };
-  int r = mpv_render_context_render(mpv_gl, params);
+  mpv_render_context_render(mpv_gl, params);
   return FALSE;
 }
 
@@ -111,9 +118,8 @@ static void on_realize(GtkGLArea *area, gpointer d) {
   }
   mpv_render_context_set_update_callback(mpv_gl, gl_update, NULL);
 
-  /* Request a render ASAP — and keep polling */
+  /* Request a render ASAP — mpv's gl_update callback will trigger subsequent ones */
   gtk_gl_area_queue_render(area);
-  gtk_gl_area_set_auto_render(GTK_GL_AREA(area), TRUE);
 }
 
 /* ---- play a file ---- */
@@ -221,6 +227,9 @@ static void build_window(GApplication *a) {
   g_signal_connect(motion, "motion", G_CALLBACK(on_motion), NULL);
   gtk_widget_add_controller(window, motion);
 
+  /* Register per-frame tick callback */
+  gtk_widget_add_tick_callback(window, on_tick, NULL, NULL);
+
   g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
   gtk_window_present(GTK_WINDOW(window));
 }
@@ -270,6 +279,7 @@ int main(int argc, char *argv[]) {
   mpv_set_option_string(mpv, "osd-level", "0");
   mpv_set_option_string(mpv, "keep-open", "yes");
   mpv_set_option_string(mpv, "config", "no");
+  mpv_set_option_string(mpv, "video-sync", "display-resample");
 
   if (mpv_initialize(mpv) < 0) { fprintf(stderr, "mpv init failed\n"); return 1; }
 
