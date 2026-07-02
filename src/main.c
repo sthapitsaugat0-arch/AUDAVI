@@ -24,6 +24,7 @@ static GtkWidget           *gl_area;
 static GtkWidget           *overlay_revealer;
 static GtkWidget           *pause_btn;
 static GtkWidget           *skip_fwd_btn;
+static GtkWidget           *skip_bwd_btn;
 static GtkWidget           *window;
 static char                *pending_file;
 static gboolean             is_paused = FALSE;
@@ -148,6 +149,13 @@ static void on_skip_forward(GtkButton *btn, gpointer d) {
   mpv_command(mpv, cmd);
 }
 
+/* ---- skip backward 10 seconds ---- */
+static void on_skip_backward(GtkButton *btn, gpointer d) {
+  (void)btn; (void)d;
+  const char *cmd[] = {"seek", "-10", "relative", NULL};
+  mpv_command(mpv, cmd);
+}
+
 /* ---- mouse-motion tracking ---- */
 static gboolean on_motion(GtkEventControllerMotion *ctrl,
                           gdouble x, gdouble y, gpointer d) {
@@ -228,8 +236,13 @@ static void build_window(GApplication *a) {
   gtk_widget_add_css_class(skip_fwd_btn, "skip-btn");
   g_signal_connect(skip_fwd_btn, "clicked", G_CALLBACK(on_skip_forward), NULL);
 
+  skip_bwd_btn = gtk_button_new_with_label("-10");
+  gtk_widget_add_css_class(skip_bwd_btn, "skip-btn");
+  g_signal_connect(skip_bwd_btn, "clicked", G_CALLBACK(on_skip_backward), NULL);
+
   GtkWidget *btn_box = gtk_center_box_new();
-  gtk_center_box_set_start_widget(GTK_CENTER_BOX(btn_box), pause_btn);
+  gtk_center_box_set_start_widget(GTK_CENTER_BOX(btn_box), skip_bwd_btn);
+  gtk_center_box_set_center_widget(GTK_CENTER_BOX(btn_box), pause_btn);
   gtk_center_box_set_end_widget(GTK_CENTER_BOX(btn_box), skip_fwd_btn);
   gtk_box_append(GTK_BOX(bar), btn_box);
   gtk_revealer_set_child(GTK_REVEALER(overlay_revealer), bar);
