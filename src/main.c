@@ -28,6 +28,9 @@ static GtkWidget           *skip_bwd_btn;
 static GtkWidget           *volume_knob;
 static double               volume_level = 100.0;
 static gboolean             volume_dragging = FALSE;
+static GtkWidget           *seek_bar;
+static gboolean             seek_bar_dragging = FALSE;
+static gboolean             seek_bar_range_set = FALSE;
 static GtkWidget           *window;
 static char                *pending_file;
 static gboolean             is_paused = FALSE;
@@ -44,6 +47,25 @@ static gboolean on_tick(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
   (void)w; (void)clock; (void)d;
   if (gl_area)
     gtk_gl_area_queue_render(GTK_GL_AREA(gl_area));
+
+  /* Update seek bar (unless user is dragging it) */
+  if (!seek_bar_dragging && seek_bar && mpv) {
+    /* Set duration range once it becomes available */
+    if (!seek_bar_range_set) {
+      double dur = 0;
+      mpv_get_property(mpv, "duration", MPV_FORMAT_DOUBLE, &dur);
+      if (dur > 0) {
+        gtk_range_set_range(GTK_RANGE(seek_bar), 0, dur);
+        gtk_range_set_increments(GTK_RANGE(seek_bar), 1, dur / 20);
+        seek_bar_range_set = TRUE;
+      }
+    }
+    /* Update position */
+    double pos;
+    mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
+    if (pos >= 0)
+      gtk_range_set_value(GTK_RANGE(seek_bar), pos);
+  }
   return G_SOURCE_CONTINUE;
 }
 
@@ -135,6 +157,7 @@ static void play_file(const char *path) {
   is_paused = FALSE;
   if (pause_btn)
     gtk_button_set_label(GTK_BUTTON(pause_btn), "\xe2\x8f\xb8");
+  seek_bar_range_set = FALSE;
 }
 
 /* ---- toggle play/pause ---- */
@@ -242,6 +265,35 @@ static void on_volume_drag_end(GtkGestureDrag *gesture, gdouble dx, gdouble dy, 
   volume_dragging = FALSE;
 }
 
+/* ---- seek bar ---- */
+static void on_seek_value_changed(GtkRange *range, gpointer d) {
+  (void)d;
+  if (!seek_bar_dragging) return;
+  double val = gtk_range_get_value(range);
+  char val_str[64];
+  snprintf(val_str, sizeof(val_str), "%.3f", val);
+  const char *cmd[] = {"seek", val_str, "absolute", NULL};
+  mpv_command(mpv, cmd);
+}
+
+static void on_seek_pressed(GtkGestureClick *gesture, gint n, gdouble x, gdouble y, gpointer d) {
+  (void)gesture; (void)n; (void)x; (void)y; (void)d;
+  seek_bar_dragging = TRUE;
+}
+
+static void on_seek_released(GtkGestureClick *gesture, gint n, gdouble x, gdouble y, gpointer d) {
+  (void)gesture; (void)n; (void)x; (void)y; (void)d;
+  /* Seek on release */
+  if (seek_bar && mpv) {
+    double val = gtk_range_get_value(GTK_RANGE(seek_bar));
+    char val_str[64];
+    snprintf(val_str, sizeof(val_str), "%.3f", val);
+    const char *cmd[] = {"seek", val_str, "absolute", NULL};
+    mpv_command(mpv, cmd);
+  }
+  seek_bar_dragging = FALSE;
+}
+
 /* ---- build the window ---- */
 static void build_window(GApplication *a) {
   window = gtk_application_window_new(GTK_APPLICATION(a));
@@ -281,6 +333,28 @@ static void build_window(GApplication *a) {
     "  min-width: 40px;\n"
     "  min-height: 40px;\n"
     "  margin: 0 8px;\n"
+    "}\n"
+    "scale.seek-bar {\n"
+    "  min-height: 6px;\n"
+    "  margin: 0 8px;\n"
+    "}\n"
+    "scale.seek-bar trough {\n"
+    "  min-height: 4px;\n"
+    "  background: rgba(255,255,255,0.2);\n"
+    "  border-radius: 2px;\n"
+    "}\n"
+    "scale.seek-bar highlight {\n"
+    "  min-height: 4px;\n"
+    "  background: #ff6b6b;\n"
+    "  border-radius: 2px;\n"
+    "}\n"
+    "scale.seek-bar slider {\n"
+    "  min-width: 12px;\n"
+    "  min-height: 12px;\n"
+    "  background: #ff6b6b;\n"
+    "  border: none;\n"
+    "  border-radius: 6px;\n"
+    "  margin: -4px 0;\n"
     "}"
   );
   gtk_style_context_add_provider_for_display(
@@ -342,10 +416,21 @@ static void build_window(GApplication *a) {
   gtk_center_box_set_center_widget(GTK_CENTER_BOX(btn_box), pause_btn);
   gtk_center_box_set_end_widget(GTK_CENTER_BOX(btn_box), skip_fwd_btn);
   gtk_box_append(GTK_BOX(bar), btn_box);
-  /* Spacer to push volume knob to the far right */
-  GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-  gtk_widget_set_hexpand(spacer, TRUE);
-  gtk_box_append(GTK_BOX(bar), spacer);
+  /* Seek bar in the middle (replaces the spacer) */
+  seek_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 0.1);
+  gtk_widget_add_css_class(seek_bar, "seek-bar");
+  gtk_widget_set_hexpand(seek_bar, TRUE);
+  gtk_range_set_slider_size_fixed(GTK_RANGE(seek_bar), FALSE);
+  gtk_scale_set_draw_value(GTK_SCALE(seek_bar), FALSE);
+  g_signal_connect(seek_bar, "value-changed", G_CALLBACK(on_seek_value_changed), NULL);
+
+  /* Gesture for drag start/end */
+  GtkGesture *seek_gesture = gtk_gesture_click_new();
+  g_signal_connect(seek_gesture, "pressed", G_CALLBACK(on_seek_pressed), NULL);
+  g_signal_connect(seek_gesture, "released", G_CALLBACK(on_seek_released), NULL);
+  gtk_widget_add_controller(seek_bar, GTK_EVENT_CONTROLLER(seek_gesture));
+
+  gtk_box_append(GTK_BOX(bar), seek_bar);
   gtk_box_append(GTK_BOX(bar), volume_knob);
   gtk_revealer_set_child(GTK_REVEALER(overlay_revealer), bar);
 
