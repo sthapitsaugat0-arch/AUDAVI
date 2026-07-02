@@ -23,6 +23,7 @@ static mpv_render_context  *mpv_gl;
 static GtkWidget           *gl_area;
 static GtkWidget           *overlay_revealer;
 static GtkWidget           *pause_btn;
+static GtkWidget           *skip_fwd_btn;
 static GtkWidget           *window;
 static char                *pending_file;
 static gboolean             is_paused = FALSE;
@@ -140,6 +141,13 @@ static void on_pause_clicked(GtkButton *btn, gpointer d) {
   gtk_button_set_label(GTK_BUTTON(btn), is_paused ? "\xe2\x96\xb6" : "\xe2\x8f\xb8");
 }
 
+/* ---- skip forward 10 seconds ---- */
+static void on_skip_forward(GtkButton *btn, gpointer d) {
+  (void)btn; (void)d;
+  const char *cmd[] = {"seek", "10", "relative", NULL};
+  mpv_command(mpv, cmd);
+}
+
 /* ---- mouse-motion tracking ---- */
 static gboolean on_motion(GtkEventControllerMotion *ctrl,
                           gdouble x, gdouble y, gpointer d) {
@@ -173,7 +181,7 @@ static void build_window(GApplication *a) {
     "  background: transparent;\n"
     "  border: none;\n"
     "  color: #ccc;\n"
-    "  font-size: 22px;\n"
+    "  font-size: 18px;\n"
     "  min-width: 44px;\n"
     "  min-height: 36px;\n"
     "  border-radius: 6px;\n"
@@ -181,6 +189,10 @@ static void build_window(GApplication *a) {
     ".overlay-bar button:hover {\n"
     "  background: rgba(255,255,255,0.08);\n"
     "  color: white;\n"
+    "}\n"
+    ".skip-btn {\n"
+    "  font-size: 16px;\n"
+    "  font-weight: bold;\n"
     "}"
   );
   gtk_style_context_add_provider_for_display(
@@ -212,8 +224,13 @@ static void build_window(GApplication *a) {
   pause_btn = gtk_button_new_with_label("\xe2\x8f\xb8");
   g_signal_connect(pause_btn, "clicked", G_CALLBACK(on_pause_clicked), NULL);
 
+  skip_fwd_btn = gtk_button_new_with_label("+10");
+  gtk_widget_add_css_class(skip_fwd_btn, "skip-btn");
+  g_signal_connect(skip_fwd_btn, "clicked", G_CALLBACK(on_skip_forward), NULL);
+
   GtkWidget *btn_box = gtk_center_box_new();
   gtk_center_box_set_start_widget(GTK_CENTER_BOX(btn_box), pause_btn);
+  gtk_center_box_set_end_widget(GTK_CENTER_BOX(btn_box), skip_fwd_btn);
   gtk_box_append(GTK_BOX(bar), btn_box);
   gtk_revealer_set_child(GTK_REVEALER(overlay_revealer), bar);
 
