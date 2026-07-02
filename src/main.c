@@ -25,6 +25,9 @@ static GtkWidget           *overlay_revealer;
 static GtkWidget           *pause_btn;
 static GtkWidget           *skip_fwd_btn;
 static GtkWidget           *skip_bwd_btn;
+static GtkWidget           *volume_knob;
+static double               volume_level = 100.0;
+static gboolean             volume_dragging = FALSE;
 static GtkWidget           *window;
 static char                *pending_file;
 static gboolean             is_paused = FALSE;
@@ -167,6 +170,78 @@ static gboolean on_motion(GtkEventControllerMotion *ctrl,
   return FALSE;
 }
 
+/* ---- volume knob ---- */
+
+/* Draw the volume knob using Cairo */
+static void draw_volume_knob(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer d) {
+  (void)area; (void)d;
+  double size = w < h ? w : h;
+  double cx = w / 2.0;
+  double cy = h / 2.0;
+  double radius = size / 2.0 - 4.0;
+
+  /* Background circle */
+  cairo_arc(cr, cx, cy, radius, 0, 2 * G_PI);
+  cairo_set_source_rgba(cr, 0.3, 0.3, 0.35, 0.6);
+  cairo_fill(cr);
+
+  /* Volume arc — from -135° to +135° (bottom arc, like a real knob) */
+  double start_angle = -0.75 * G_PI;   /* -135° */
+  double end_angle   =  0.75 * G_PI;   /* +135° */
+  double frac = volume_level / 100.0;
+  double current_angle = start_angle + frac * (end_angle - start_angle);
+
+  /* Active arc (from start to current) — coral color */
+  cairo_set_line_width(cr, 3.0);
+  cairo_arc(cr, cx, cy, radius - 2, start_angle, current_angle);
+  cairo_set_source_rgb(cr, 1.0, 0.42, 0.42); /* #ff6b6b */
+  cairo_stroke(cr);
+
+  /* Inactive arc (from current to end) */
+  cairo_arc(cr, cx, cy, radius - 2, current_angle, end_angle);
+  cairo_set_source_rgba(cr, 0.6, 0.6, 0.65, 0.4);
+  cairo_stroke(cr);
+
+  /* Center dot */
+  cairo_arc(cr, cx, cy, 3, 0, 2 * G_PI);
+  cairo_set_source_rgb(cr, 0.8, 0.8, 0.85);
+  cairo_fill(cr);
+}
+
+static void apply_volume(double val) {
+  if (val < 0) val = 0;
+  if (val > 100) val = 100;
+  volume_level = val;
+  char vol_str[16];
+  snprintf(vol_str, sizeof(vol_str), "%.0f", val);
+  mpv_set_property_string(mpv, "volume", vol_str);
+  if (volume_knob)
+    gtk_widget_queue_draw(volume_knob);
+}
+
+static gboolean on_volume_scroll(GtkEventControllerScroll *ctrl, gdouble dx, gdouble dy, gpointer d) {
+  (void)ctrl; (void)dx; (void)d;
+  apply_volume(volume_level - dy * 5);
+  return GDK_EVENT_STOP;
+}
+
+static void on_volume_drag_begin(GtkGestureDrag *gesture, gdouble x, gdouble y, gpointer d) {
+  (void)gesture; (void)x; (void)y; (void)d;
+  volume_dragging = TRUE;
+}
+
+static void on_volume_drag_update(GtkGestureDrag *gesture, gdouble dx, gdouble dy, gpointer d) {
+  (void)gesture; (void)dx;
+  (void)d;
+  if (volume_dragging)
+    apply_volume(volume_level - dy * 0.5);
+}
+
+static void on_volume_drag_end(GtkGestureDrag *gesture, gdouble dx, gdouble dy, gpointer d) {
+  (void)gesture; (void)dx; (void)dy; (void)d;
+  volume_dragging = FALSE;
+}
+
 /* ---- build the window ---- */
 static void build_window(GApplication *a) {
   window = gtk_application_window_new(GTK_APPLICATION(a));
@@ -201,6 +276,11 @@ static void build_window(GApplication *a) {
     ".skip-btn {\n"
     "  font-size: 16px;\n"
     "  font-weight: bold;\n"
+    "}\n"
+    ".volume-knob {\n"
+    "  min-width: 40px;\n"
+    "  min-height: 40px;\n"
+    "  margin: 0 8px;\n"
     "}"
   );
   gtk_style_context_add_provider_for_display(
@@ -240,11 +320,33 @@ static void build_window(GApplication *a) {
   gtk_widget_add_css_class(skip_bwd_btn, "skip-btn");
   g_signal_connect(skip_bwd_btn, "clicked", G_CALLBACK(on_skip_backward), NULL);
 
+  /* Volume knob */
+  volume_knob = gtk_drawing_area_new();
+  gtk_widget_add_css_class(volume_knob, "volume-knob");
+  gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(volume_knob), draw_volume_knob, NULL, NULL);
+
+  /* Scroll to change volume */
+  GtkEventController *scroll = GTK_EVENT_CONTROLLER(gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES));
+  g_signal_connect(scroll, "scroll", G_CALLBACK(on_volume_scroll), NULL);
+  gtk_widget_add_controller(volume_knob, scroll);
+
+  /* Drag to change volume */
+  GtkGesture *drag = gtk_gesture_drag_new();
+  g_signal_connect(drag, "drag-begin", G_CALLBACK(on_volume_drag_begin), NULL);
+  g_signal_connect(drag, "drag-update", G_CALLBACK(on_volume_drag_update), NULL);
+  g_signal_connect(drag, "drag-end", G_CALLBACK(on_volume_drag_end), NULL);
+  gtk_widget_add_controller(volume_knob, GTK_EVENT_CONTROLLER(drag));
+
   GtkWidget *btn_box = gtk_center_box_new();
   gtk_center_box_set_start_widget(GTK_CENTER_BOX(btn_box), skip_bwd_btn);
   gtk_center_box_set_center_widget(GTK_CENTER_BOX(btn_box), pause_btn);
   gtk_center_box_set_end_widget(GTK_CENTER_BOX(btn_box), skip_fwd_btn);
   gtk_box_append(GTK_BOX(bar), btn_box);
+  /* Spacer to push volume knob to the far right */
+  GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_hexpand(spacer, TRUE);
+  gtk_box_append(GTK_BOX(bar), spacer);
+  gtk_box_append(GTK_BOX(bar), volume_knob);
   gtk_revealer_set_child(GTK_REVEALER(overlay_revealer), bar);
 
   gtk_overlay_add_overlay(GTK_OVERLAY(stack), overlay_revealer);
