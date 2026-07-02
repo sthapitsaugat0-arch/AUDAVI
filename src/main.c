@@ -63,12 +63,19 @@ static gboolean on_tick(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
         seek_bar_range_set = TRUE;
       }
     }
-    /* Update position */
+    /* Update position — expand range if duration unknown */
     {
       double pos;
       mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
-      if (pos >= 0)
+      if (pos >= 0) {
         gtk_range_set_value(GTK_RANGE(seek_bar), pos);
+        if (!seek_bar_range_set) {
+          GtkAdjustment *adj = gtk_range_get_adjustment(GTK_RANGE(seek_bar));
+          double max = gtk_adjustment_get_upper(adj);
+          if (pos > max - 10)
+            gtk_range_set_range(GTK_RANGE(seek_bar), 0, pos + 60);
+        }
+      }
     }
   }
   return G_SOURCE_CONTINUE;
