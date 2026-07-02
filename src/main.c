@@ -16,6 +16,7 @@
 #include <locale.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 /* ---- state ---- */
 static mpv_handle          *mpv;
@@ -25,6 +26,8 @@ static GtkWidget           *overlay_revealer;
 static GtkWidget           *pause_btn;
 static GtkWidget           *skip_fwd_btn;
 static GtkWidget           *skip_bwd_btn;
+static GtkWidget           *next_btn;
+static GtkWidget           *prev_btn;
 static GtkWidget           *volume_knob;
 static double               volume_level = 100.0;
 static gboolean             volume_dragging = FALSE;
@@ -160,6 +163,44 @@ static void play_file(const char *path) {
   seek_bar_range_set = FALSE;
 }
 
+/* ---- load a file and add all videos from the same directory to playlist ---- */
+static void play_file_with_folder(const char *path) {
+  if (!path || !*path) return;
+
+  char *dir = g_path_get_dirname(path);
+  if (!dir) { play_file(path); return; }
+
+  /* Load the primary file */
+  const char *load_cmd[] = {"loadfile", path, "replace", NULL};
+  mpv_command(mpv, load_cmd);
+
+  /* Find all video files in the same directory and add to playlist */
+  char find_cmd[4096];
+  snprintf(find_cmd, sizeof(find_cmd),
+    "find '%s' -maxdepth 1 -type f \\( -name '*.mp4' -o -name '*.mkv' -o -name '*.webm' "
+    "-o -name '*.avi' -o -name '*.mov' \\) 2>/dev/null | sort",
+    dir);
+
+  FILE *fp = popen(find_cmd, "r");
+  if (fp) {
+    char line[4096];
+    while (fgets(line, sizeof(line), fp)) {
+      size_t len = strlen(line);
+      if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
+      if (len == 0 || strcmp(line, path) == 0) continue;
+      const char *add_cmd[] = {"loadfile", line, "append", NULL};
+      mpv_command(mpv, add_cmd);
+    }
+    pclose(fp);
+  }
+
+  g_free(dir);
+  is_paused = FALSE;
+  if (pause_btn)
+    gtk_button_set_label(GTK_BUTTON(pause_btn), "\xe2\x8f\xb8");
+  seek_bar_range_set = FALSE;
+}
+
 /* ---- toggle play/pause ---- */
 static void on_pause_clicked(GtkButton *btn, gpointer d) {
   (void)d;
@@ -179,6 +220,19 @@ static void on_skip_forward(GtkButton *btn, gpointer d) {
 static void on_skip_backward(GtkButton *btn, gpointer d) {
   (void)btn; (void)d;
   const char *cmd[] = {"seek", "-10", "relative", NULL};
+  mpv_command(mpv, cmd);
+}
+
+/* ---- next/previous track ---- */
+static void on_next(GtkButton *btn, gpointer d) {
+  (void)btn; (void)d;
+  const char *cmd[] = {"playlist-next", "weak", NULL};
+  mpv_command(mpv, cmd);
+}
+
+static void on_prev(GtkButton *btn, gpointer d) {
+  (void)btn; (void)d;
+  const char *cmd[] = {"playlist-prev", "weak", NULL};
   mpv_command(mpv, cmd);
 }
 
@@ -394,6 +448,14 @@ static void build_window(GApplication *a) {
   gtk_widget_add_css_class(skip_bwd_btn, "skip-btn");
   g_signal_connect(skip_bwd_btn, "clicked", G_CALLBACK(on_skip_backward), NULL);
 
+  prev_btn = gtk_button_new_with_label("|<");
+  gtk_widget_add_css_class(prev_btn, "skip-btn");
+  g_signal_connect(prev_btn, "clicked", G_CALLBACK(on_prev), NULL);
+
+  next_btn = gtk_button_new_with_label(">|");
+  gtk_widget_add_css_class(next_btn, "skip-btn");
+  g_signal_connect(next_btn, "clicked", G_CALLBACK(on_next), NULL);
+
   /* Volume knob */
   volume_knob = gtk_drawing_area_new();
   gtk_widget_add_css_class(volume_knob, "volume-knob");
@@ -411,10 +473,13 @@ static void build_window(GApplication *a) {
   g_signal_connect(drag, "drag-end", G_CALLBACK(on_volume_drag_end), NULL);
   gtk_widget_add_controller(volume_knob, GTK_EVENT_CONTROLLER(drag));
 
-  GtkWidget *btn_box = gtk_center_box_new();
-  gtk_center_box_set_start_widget(GTK_CENTER_BOX(btn_box), skip_bwd_btn);
-  gtk_center_box_set_center_widget(GTK_CENTER_BOX(btn_box), pause_btn);
-  gtk_center_box_set_end_widget(GTK_CENTER_BOX(btn_box), skip_fwd_btn);
+  GtkWidget *btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+  gtk_widget_set_halign(btn_box, GTK_ALIGN_CENTER);
+  gtk_box_append(GTK_BOX(btn_box), prev_btn);
+  gtk_box_append(GTK_BOX(btn_box), skip_bwd_btn);
+  gtk_box_append(GTK_BOX(btn_box), pause_btn);
+  gtk_box_append(GTK_BOX(btn_box), skip_fwd_btn);
+  gtk_box_append(GTK_BOX(btn_box), next_btn);
   gtk_box_append(GTK_BOX(bar), btn_box);
   /* Seek bar in the middle (replaces the spacer) */
   seek_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 0.1);
@@ -457,7 +522,7 @@ static void on_activate(GApplication *a, gpointer d) {
   if (window) return;
   build_window(a);
   if (pending_file) {
-    play_file(pending_file);
+    play_file_with_folder(pending_file);
     free(pending_file);
     pending_file = NULL;
   }
@@ -475,7 +540,7 @@ static void on_open(GApplication *a, GFile **files, gint n,
       pending_file = strdup(path);
       g_free(path);
       /* mpv is already initialized now, so play it */
-      play_file(pending_file);
+      play_file_with_folder(pending_file);
       free(pending_file);
       pending_file = NULL;
     }
