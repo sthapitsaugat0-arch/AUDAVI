@@ -64,10 +64,12 @@ static gboolean on_tick(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
       }
     }
     /* Update position */
-    double pos;
-    mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
-    if (pos >= 0)
-      gtk_range_set_value(GTK_RANGE(seek_bar), pos);
+    {
+      double pos;
+      mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
+      if (pos >= 0)
+        gtk_range_set_value(GTK_RANGE(seek_bar), pos);
+    }
   }
   return G_SOURCE_CONTINUE;
 }
@@ -226,12 +228,22 @@ static void on_skip_backward(GtkButton *btn, gpointer d) {
 /* ---- next/previous track ---- */
 static void on_next(GtkButton *btn, gpointer d) {
   (void)btn; (void)d;
+  if (seek_bar) {
+    gtk_range_set_range(GTK_RANGE(seek_bar), 0, 100);
+    gtk_range_set_value(GTK_RANGE(seek_bar), 0);
+  }
+  seek_bar_range_set = FALSE;
   const char *cmd[] = {"playlist-next", "weak", NULL};
   mpv_command(mpv, cmd);
 }
 
 static void on_prev(GtkButton *btn, gpointer d) {
   (void)btn; (void)d;
+  if (seek_bar) {
+    gtk_range_set_range(GTK_RANGE(seek_bar), 0, 100);
+    gtk_range_set_value(GTK_RANGE(seek_bar), 0);
+  }
+  seek_bar_range_set = FALSE;
   const char *cmd[] = {"playlist-prev", "weak", NULL};
   mpv_command(mpv, cmd);
 }
