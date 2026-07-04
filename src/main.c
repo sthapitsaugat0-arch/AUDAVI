@@ -298,10 +298,42 @@ static void draw_volume_knob(GtkDrawingArea *area, cairo_t *cr, int w, int h, gp
   cairo_set_source_rgba(cr, 0.6, 0.6, 0.65, 0.4);
   cairo_stroke(cr);
 
-  /* Center dot */
-  cairo_arc(cr, cx, cy, 3, 0, 2 * G_PI);
-  cairo_set_source_rgb(cr, 0.8, 0.8, 0.85);
+  /* Speaker icon */
+  double icon_size = radius * 0.5;
+  double s = icon_size;
+
+  /* Speaker body (rectangle) */
+  cairo_rectangle(cr, cx - s * 0.3, cy - s * 0.35, s * 0.45, s * 0.7);
+  cairo_set_source_rgba(cr, 0.8, 0.8, 0.85, 0.7);
   cairo_fill(cr);
+
+  /* Speaker cone (triangle on the right) */
+  cairo_move_to(cr, cx + s * 0.15, cy - s * 0.3);
+  cairo_line_to(cr, cx + s * 0.6, cy - s * 0.5);
+  cairo_line_to(cr, cx + s * 0.6, cy + s * 0.5);
+  cairo_line_to(cr, cx + s * 0.15, cy + s * 0.3);
+  cairo_close_path(cr);
+  cairo_fill(cr);
+
+  /* If muted (volume 0), draw X across */
+  if (volume_level < 0.5) {
+    cairo_set_line_width(cr, 2.0);
+    cairo_move_to(cr, cx, cy - s * 0.35);
+    cairo_line_to(cr, cx + s * 0.5, cy + s * 0.35);
+    cairo_move_to(cr, cx + s * 0.5, cy - s * 0.35);
+    cairo_line_to(cr, cx, cy + s * 0.35);
+    cairo_set_source_rgba(cr, 1.0, 0.42, 0.42, 0.8);
+    cairo_stroke(cr);
+  }
+
+  /* Sound waves (showing there's audio) */
+  if (volume_level > 0.5) {
+    cairo_set_line_width(cr, 1.5);
+    cairo_set_source_rgba(cr, 0.8, 0.8, 0.85, 0.5);
+    /* Arc wave */
+    cairo_arc(cr, cx + s * 0.5, cy, s * 0.15, -0.5, 0.5);
+    cairo_stroke(cr);
+  }
 }
 
 static void apply_volume(double val) {
