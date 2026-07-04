@@ -48,10 +48,16 @@ static void on_window_destroy(void) {
 /* ---- per-frame tick callback (synced to display refresh) ---- */
 static gboolean on_tick(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
   (void)w; (void)clock; (void)d;
-  if (gl_area)
-    gtk_gl_area_queue_render(GTK_GL_AREA(gl_area));
+  /* Queue GL render every tick when playing — skip when paused to let UI breathe */
+  if (gl_area && mpv) {
+    char *paused = mpv_get_property_string(mpv, "pause");
+    gboolean is_paused = paused && strcmp(paused, "yes") == 0;
+    mpv_free(paused);
+    if (!is_paused)
+      gtk_gl_area_queue_render(GTK_GL_AREA(gl_area));
+  }
 
-  /* Update seek bar (unless user is dragging it) */
+  /* Update seek bar (unless user is dragging it) — throttled to every 5th tick */
   if (!seek_bar_dragging && seek_bar && mpv) {
     /* Set duration range once it becomes available */
     if (!seek_bar_range_set) {
@@ -63,17 +69,20 @@ static gboolean on_tick(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
         seek_bar_range_set = TRUE;
       }
     }
-    /* Update position — expand range if duration unknown */
+    /* Update position — throttle to every 5th tick to reduce mpv API pressure */
     {
-      double pos;
-      mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
-      if (pos >= 0) {
-        gtk_range_set_value(GTK_RANGE(seek_bar), pos);
-        if (!seek_bar_range_set) {
-          GtkAdjustment *adj = gtk_range_get_adjustment(GTK_RANGE(seek_bar));
-          double max = gtk_adjustment_get_upper(adj);
-          if (pos > max - 10)
-            gtk_range_set_range(GTK_RANGE(seek_bar), 0, pos + 60);
+      static int tick_count = 0;
+      if (++tick_count % 5 == 0) {
+        double pos;
+        mpv_get_property(mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
+        if (pos >= 0) {
+          gtk_range_set_value(GTK_RANGE(seek_bar), pos);
+          if (!seek_bar_range_set) {
+            GtkAdjustment *adj = gtk_range_get_adjustment(GTK_RANGE(seek_bar));
+            double max = gtk_adjustment_get_upper(adj);
+            if (pos > max - 10)
+              gtk_range_set_range(GTK_RANGE(seek_bar), 0, pos + 60);
+          }
         }
       }
     }
@@ -479,7 +488,7 @@ static void build_window(GApplication *a) {
   overlay_revealer = gtk_revealer_new();
   gtk_revealer_set_transition_type(GTK_REVEALER(overlay_revealer),
                                    GTK_REVEALER_TRANSITION_TYPE_SLIDE_UP);
-  gtk_revealer_set_transition_duration(GTK_REVEALER(overlay_revealer), 200);
+  gtk_revealer_set_transition_duration(GTK_REVEALER(overlay_revealer), 100);
 
   GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_set_name(bar, "controls");
