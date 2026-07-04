@@ -412,10 +412,10 @@ static void build_window(GApplication *a) {
     "window { background: black; }\n"
     ".overlay-bar {\n"
     "  background: rgba(20,20,25,0.88);\n"
-    "  border-radius: 8px;\n"
-    "  margin: 0 12px 12px 12px;\n"
+    "  border-radius: 0px;\n"
+    "  margin: 0;\n"
     "  padding: 8px;\n"
-    "  min-height: 40px;\n"
+    "  min-height: 120px;\n"
     "}\n"
     ".overlay-bar button {\n"
     "  background: transparent;\n"
@@ -486,7 +486,7 @@ static void build_window(GApplication *a) {
   gtk_widget_add_css_class(bar, "overlay-bar");
   gtk_widget_set_halign(bar, GTK_ALIGN_FILL);
   gtk_widget_set_valign(bar, GTK_ALIGN_END);
-  gtk_widget_set_margin_bottom(bar, 12);
+  gtk_widget_set_margin_bottom(bar, 0);
 
   pause_btn = gtk_button_new_with_label("\xe2\x8f\xb8");
   g_signal_connect(pause_btn, "clicked", G_CALLBACK(on_pause_clicked), NULL);
