@@ -261,7 +261,7 @@ static gboolean on_motion(GtkEventControllerMotion *ctrl,
   (void)ctrl; (void)x; (void)d;
   GtkWidget *win = GTK_WIDGET(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(ctrl)));
   int height = gtk_widget_get_height(win);
-  gboolean show = (y >= height - 60);
+  gboolean show = (y >= height - 130);
   gtk_revealer_set_reveal_child(GTK_REVEALER(overlay_revealer), show);
   return FALSE;
 }
